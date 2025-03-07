@@ -80,6 +80,8 @@ document.addEventListener('DOMContentLoaded', function() {
       // Inicializar contexto de áudio
       audioContext = new AudioContext();
       mediaStreamSource = audioContext.createMediaStreamSource(stream);
+      mediaStreamSource.connect(audioContext.destination);
+
       
       // Configurar analisadores
       analyser = audioContext.createAnalyser();
