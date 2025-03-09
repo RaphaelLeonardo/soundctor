@@ -175,6 +175,18 @@ canvas {
   height: 180px;
 }
 
+#spectrogram3d {
+  width: 100%;
+  height: 300px;
+  background-color: var(--dark-bg);
+  border-radius: var(--border-radius);
+  overflow: hidden;
+}
+
+#oscilloscope {
+  background: linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.9) 75%, rgba(0,0,0,1) 100%);
+}
+
 .vu-container {
   display: flex;
   flex-direction: column;

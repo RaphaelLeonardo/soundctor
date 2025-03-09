@@ -2,8 +2,10 @@ document.addEventListener('DOMContentLoaded', function() {
   const startButton = document.getElementById('startCapture');
   const stopButton = document.getElementById('stopCapture');
   const statusText = document.getElementById('status');
-  const spectrogramCanvas = document.getElementById('spectrogram');
-  const spectrogramCtx = spectrogramCanvas.getContext('2d');
+  const oscilloscopeCanvas = document.getElementById('oscilloscope');
+  const oscilloscopeCtx = oscilloscopeCanvas.getContext('2d');
+  const spectrogram3dCanvas = document.getElementById('spectrogram3d');
+  const spectrogram3dCtx = spectrogram3dCanvas.getContext('2d');
   const leftMeter = document.getElementById('leftMeter');
   const rightMeter = document.getElementById('rightMeter');
   const leftValue = document.getElementById('leftValue');
@@ -51,14 +53,25 @@ document.addEventListener('DOMContentLoaded', function() {
   let isCapturing = false;
   let animationFrameId = null;
   
-  // Configuração do espectrograma
-  let spectrogramData = [];
-  const spectrogramWidth = spectrogramCanvas.width;
-  const spectrogramHeight = spectrogramCanvas.height;
+  // Variáveis para o espectrograma 3D
+  let barsArray = [];
+  let barCount = 64;
+  let angle = 0;
   
-  // Limpar o canvas inicialmente
-  spectrogramCtx.fillStyle = 'black';
-  spectrogramCtx.fillRect(0, 0, spectrogramWidth, spectrogramHeight);
+  // Configuração para o osciloscópio
+  oscilloscopeCtx.strokeStyle = '#00ff00';
+  oscilloscopeCtx.lineWidth = 2;
+  oscilloscopeCtx.shadowBlur = 4;
+  oscilloscopeCtx.shadowColor = '#00ff00';
+  
+  // Configuração para o espectrograma 3D
+  // Inicializar o array de barras
+  for (let i = 0; i < barCount; i++) {
+    barsArray.push({
+      value: 0,
+      targetValue: 0
+    });
+  }
   
   // Reiniciar o estado para garantir que comecemos corretamente
   statusText.textContent = 'Status: Pronto para capturar';
@@ -181,6 +194,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const frequencyData = new Uint8Array(analyser.frequencyBinCount);
     const timeDataLeft = new Float32Array(analyserLeft.fftSize);
     const timeDataRight = new Float32Array(analyserRight.fftSize);
+    const oscilloscopeData = new Float32Array(analyser.fftSize);
     
     isCapturing = true;
     
@@ -193,8 +207,11 @@ document.addEventListener('DOMContentLoaded', function() {
     function updateVisualization() {
       if (!isCapturing) return;
       
-      // Dados de frequência para espectrograma
+      // Dados de frequência para visualizações
       analyser.getByteFrequencyData(frequencyData);
+      
+      // Dados temporais para osciloscópio
+      analyser.getFloatTimeDomainData(oscilloscopeData);
       
       // Dados temporais para VU meters
       analyserLeft.getFloatTimeDomainData(timeDataLeft);
@@ -216,7 +233,8 @@ document.addEventListener('DOMContentLoaded', function() {
       const rmsRight = Math.sqrt(sumRight / timeDataRight.length);
       
       // Atualizar visualizações
-      updateSpectrogram(frequencyData);
+      updateOscilloscope(oscilloscopeData);
+      updateSpectrogram3D(frequencyData);
       updateVUMeters(rmsLeft, rmsRight);
       
       // Continuar loop
@@ -254,52 +272,184 @@ document.addEventListener('DOMContentLoaded', function() {
     // Resetar estado visual
     statusText.className = 'status';
     document.body.classList.remove('capturing');
+    
+    // Limpar osciloscópio
+    oscilloscopeCtx.clearRect(0, 0, oscilloscopeCanvas.width, oscilloscopeCanvas.height);
+    
+    // Limpar espectrograma 3D
+    spectrogram3dCtx.clearRect(0, 0, spectrogram3dCanvas.width, spectrogram3dCanvas.height);
   }
   
-  // Função para atualizar o espectrograma
-  function updateSpectrogram(frequencyData) {
-    // Deslocar os dados existentes para a esquerda
-    spectrogramCtx.drawImage(spectrogramCanvas, 
-      1, 0, spectrogramWidth - 1, spectrogramHeight, 
-      0, 0, spectrogramWidth - 1, spectrogramHeight);
+  // Função para atualizar o osciloscópio
+  function updateOscilloscope(audioData) {
+    const canvasWidth = oscilloscopeCanvas.width;
+    const canvasHeight = oscilloscopeCanvas.height;
     
-    // Adicionar nova coluna de dados
-    const barHeight = spectrogramHeight / frequencyData.length;
+    // Limpar canvas
+    oscilloscopeCtx.clearRect(0, 0, canvasWidth, canvasHeight);
     
-    for (let i = 0; i < frequencyData.length; i++) {
-      // Converter valor de frequência para cor
-      const value = frequencyData[i];
-      const intensity = value / 255;
+    // Desenhar linha base (eixo X)
+    oscilloscopeCtx.strokeStyle = 'rgba(50, 50, 50, 0.5)';
+    oscilloscopeCtx.lineWidth = 1;
+    oscilloscopeCtx.beginPath();
+    oscilloscopeCtx.moveTo(0, canvasHeight / 2);
+    oscilloscopeCtx.lineTo(canvasWidth, canvasHeight / 2);
+    oscilloscopeCtx.stroke();
+    
+    // Desenhar grades horizontais
+    for (let i = 0; i < canvasHeight; i += 20) {
+      oscilloscopeCtx.beginPath();
+      oscilloscopeCtx.moveTo(0, i);
+      oscilloscopeCtx.lineTo(canvasWidth, i);
+      oscilloscopeCtx.strokeStyle = 'rgba(50, 50, 50, 0.2)';
+      oscilloscopeCtx.stroke();
+    }
+    
+    // Desenhar grades verticais
+    for (let i = 0; i < canvasWidth; i += 20) {
+      oscilloscopeCtx.beginPath();
+      oscilloscopeCtx.moveTo(i, 0);
+      oscilloscopeCtx.lineTo(i, canvasHeight);
+      oscilloscopeCtx.strokeStyle = 'rgba(50, 50, 50, 0.2)';
+      oscilloscopeCtx.stroke();
+    }
+    
+    // Verificar se estamos no modo escuro
+    const isDarkTheme = document.body.classList.contains('dark-theme');
+    
+    // Definir cor da onda com base no tema
+    oscilloscopeCtx.strokeStyle = isDarkTheme ? '#a78bfa' : '#4285f4';
+    oscilloscopeCtx.shadowColor = isDarkTheme ? '#8b5cf6' : '#3367d6';
+    oscilloscopeCtx.lineWidth = 2;
+    oscilloscopeCtx.shadowBlur = 5;
+    
+    // Desenhar a forma de onda
+    oscilloscopeCtx.beginPath();
+    
+    const sliceWidth = canvasWidth / audioData.length;
+    let x = 0;
+    
+    for (let i = 0; i < audioData.length; i++) {
+      const v = audioData[i];
+      const y = (v * canvasHeight / 2) + (canvasHeight / 2);
       
-      // Paleta de cores: azul -> ciano -> verde -> amarelo -> vermelho
-      let r, g, b;
-      
-      if (intensity < 0.25) {
-        r = 0;
-        g = 0;
-        b = Math.floor(255 * (intensity * 4));
-      } else if (intensity < 0.5) {
-        r = 0;
-        g = Math.floor(255 * ((intensity - 0.25) * 4));
-        b = 255;
-      } else if (intensity < 0.75) {
-        r = Math.floor(255 * ((intensity - 0.5) * 4));
-        g = 255;
-        b = Math.floor(255 * (1 - ((intensity - 0.5) * 4)));
+      if (i === 0) {
+        oscilloscopeCtx.moveTo(x, y);
       } else {
-        r = 255;
-        g = Math.floor(255 * (1 - ((intensity - 0.75) * 4)));
-        b = 0;
+        oscilloscopeCtx.lineTo(x, y);
       }
       
-      // Desenhar pixel
-      spectrogramCtx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-      spectrogramCtx.fillRect(
-        spectrogramWidth - 1,
-        spectrogramHeight - (i + 1) * barHeight,
-        1,
-        barHeight
+      x += sliceWidth;
+    }
+    
+    oscilloscopeCtx.stroke();
+  }
+  
+  // Função para atualizar o espectrograma 3D
+  function updateSpectrogram3D(frequencyData) {
+    const canvasWidth = spectrogram3dCanvas.width;
+    const canvasHeight = spectrogram3dCanvas.height;
+    const barWidth = canvasWidth / barCount;
+    const centerY = canvasHeight * 0.65;
+    
+    // Limpar canvas com um gradiente de fundo
+    const isDarkTheme = document.body.classList.contains('dark-theme');
+    const gradient = spectrogram3dCtx.createLinearGradient(0, 0, 0, canvasHeight);
+    
+    if (isDarkTheme) {
+      gradient.addColorStop(0, '#0a1931');
+      gradient.addColorStop(1, '#16213e');
+    } else {
+      gradient.addColorStop(0, '#e6f3ff');
+      gradient.addColorStop(1, '#f8f9fa');
+    }
+    
+    spectrogram3dCtx.fillStyle = gradient;
+    spectrogram3dCtx.fillRect(0, 0, canvasWidth, canvasHeight);
+    
+    // Atualizar valores alvo das barras
+    for (let i = 0; i < barCount; i++) {
+      const index = Math.floor(i * frequencyData.length / barCount);
+      barsArray[i].targetValue = frequencyData[index] / 255;
+      
+      // Interpolação suave para animação
+      barsArray[i].value += (barsArray[i].targetValue - barsArray[i].value) * 0.3;
+    }
+    
+    // Animar a rotação
+    angle += 0.01;
+    
+    // Desenhar barras em perspectiva
+    for (let i = 0; i < barCount; i++) {
+      const normalizedI = i / barCount;
+      
+      // Calcular coordenadas 3D
+      const x3d = (normalizedI - 0.5) * 2;
+      const y3d = barsArray[i].value * 0.8;
+      const z3d = 0;
+      
+      // Aplicar rotação
+      const rotatedX = x3d * Math.cos(angle) - z3d * Math.sin(angle);
+      const rotatedZ = x3d * Math.sin(angle) + z3d * Math.cos(angle);
+      
+      // Projetar para 2D
+      const scale = 1 / (rotatedZ + 3); // Distância da câmera
+      const x2d = rotatedX * scale * canvasWidth * 0.4 + canvasWidth / 2;
+      const height = y3d * canvasHeight * 0.6;
+      
+      // Calcular cor baseada no valor
+      let hue = (240 - (normalizedI * 240)) % 360; // Azul a vermelho
+      const saturation = 80 + barsArray[i].value * 20; // Mais saturado quando mais alto
+      const lightness = 40 + barsArray[i].value * 20; // Mais claro quando mais alto
+      
+      // Desenhar barra
+      spectrogram3dCtx.fillStyle = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+      
+      // Desenhar uma barra em perspectiva (trapézio)
+      spectrogram3dCtx.beginPath();
+      const perspective = 0.5 + 0.5 * scale; // Efeito de perspectiva para a largura
+      const barHeightTop = centerY - height;
+      
+      // Topo do trapézio (mais estreito)
+      spectrogram3dCtx.moveTo(x2d - (barWidth * perspective / 2), barHeightTop);
+      spectrogram3dCtx.lineTo(x2d + (barWidth * perspective / 2), barHeightTop);
+      
+      // Base do trapézio (mais largo)
+      spectrogram3dCtx.lineTo(x2d + (barWidth / 2), centerY);
+      spectrogram3dCtx.lineTo(x2d - (barWidth / 2), centerY);
+      
+      spectrogram3dCtx.closePath();
+      spectrogram3dCtx.fill();
+      
+      // Adicionar brilho no topo
+      const gradient = spectrogram3dCtx.createLinearGradient(x2d, barHeightTop, x2d, barHeightTop + 10);
+      gradient.addColorStop(0, `hsla(${hue}, ${saturation}%, ${lightness + 30}%, 0.8)`);
+      gradient.addColorStop(1, `hsla(${hue}, ${saturation}%, ${lightness}%, 0)`);
+      
+      spectrogram3dCtx.fillStyle = gradient;
+      spectrogram3dCtx.fillRect(
+        x2d - (barWidth * perspective / 2),
+        barHeightTop,
+        barWidth * perspective,
+        10
       );
+    }
+    
+    // Desenhar grade de referência
+    spectrogram3dCtx.strokeStyle = isDarkTheme ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
+    spectrogram3dCtx.lineWidth = 1;
+    
+    // Linhas horizontais da grade
+    for (let y = centerY; y > centerY - canvasHeight * 0.6; y -= 20) {
+      spectrogram3dCtx.beginPath();
+      
+      // Desenhar linha com perspectiva
+      const leftX = canvasWidth / 2 - canvasWidth * 0.4 * Math.cos(angle);
+      const rightX = canvasWidth / 2 + canvasWidth * 0.4 * Math.cos(angle);
+      
+      spectrogram3dCtx.moveTo(leftX, y);
+      spectrogram3dCtx.lineTo(rightX, y);
+      spectrogram3dCtx.stroke();
     }
   }
   
@@ -325,4 +475,9 @@ document.addEventListener('DOMContentLoaded', function() {
     leftValue.textContent = dbLeft > -100 ? dbLeft.toFixed(1) + ' dB' : '-∞ dB';
     rightValue.textContent = dbRight > -100 ? dbRight.toFixed(1) + ' dB' : '-∞ dB';
   }
+  
+  // Lidar com redimensionamento da janela
+  window.addEventListener('resize', function() {
+    // Ajustar tamanho do canvas se necessário
+  });
 });
