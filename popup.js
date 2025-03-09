@@ -8,6 +8,38 @@ document.addEventListener('DOMContentLoaded', function() {
   const rightMeter = document.getElementById('rightMeter');
   const leftValue = document.getElementById('leftValue');
   const rightValue = document.getElementById('rightValue');
+  const themeToggle = document.getElementById('themeToggle');
+  
+  // Configurar o alternador de tema
+  // Verificar se há uma preferência de tema salva
+  const savedTheme = localStorage.getItem('theme');
+  
+  // Se houver uma preferência salva, aplicá-la
+  if (savedTheme === 'dark') {
+    document.body.classList.add('dark-theme');
+    themeToggle.checked = true;
+  } else if (savedTheme === 'light') {
+    document.body.classList.remove('dark-theme');
+    themeToggle.checked = false;
+  } else {
+    // Se não houver preferência, verificar preferência do sistema
+    const prefersDarkScheme = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    if (prefersDarkScheme) {
+      document.body.classList.add('dark-theme');
+      themeToggle.checked = true;
+    }
+  }
+  
+  // Adicionar evento ao alternador de tema
+  themeToggle.addEventListener('change', function() {
+    if (this.checked) {
+      document.body.classList.add('dark-theme');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      document.body.classList.remove('dark-theme');
+      localStorage.setItem('theme', 'light');
+    }
+  });
   
   // Variáveis para o áudio
   let audioContext = null;
@@ -28,13 +60,21 @@ document.addEventListener('DOMContentLoaded', function() {
   spectrogramCtx.fillStyle = 'black';
   spectrogramCtx.fillRect(0, 0, spectrogramWidth, spectrogramHeight);
   
+  // Reiniciar o estado para garantir que comecemos corretamente
+  statusText.textContent = 'Status: Pronto para capturar';
+  statusText.className = 'status'; // Remover classes de estado
+  document.body.classList.remove('capturing');
+  startButton.disabled = false;
+  stopButton.disabled = true;
+  
   // Função para iniciar a captura
   startButton.addEventListener('click', function() {
     startButton.disabled = true;
     stopButton.disabled = false;
     statusText.textContent = 'Status: Tentando capturar...';
+    statusText.className = 'status';
     
-    // Solicitar captura diretamente aqui
+    // Solicitar captura
     startAudioCapture();
   });
   
@@ -44,117 +84,147 @@ document.addEventListener('DOMContentLoaded', function() {
     startButton.disabled = false;
     stopButton.disabled = true;
     statusText.textContent = 'Status: Captura interrompida';
+    statusText.className = 'status';
+    document.body.classList.remove('capturing');
   });
   
   // Função para capturar áudio
   async function startAudioCapture() {
     try {
-      // Usar chrome.tabCapture - verificar se está disponível
-      if (!chrome.tabCapture || typeof chrome.tabCapture.capture !== 'function') {
-        throw new Error('A API tabCapture não está disponível. Verifique se você está usando uma versão compatível do Chrome.');
+      // Abordagem direta: usar getDisplayMedia para compartilhar tab/sistema
+      statusText.textContent = 'Status: Solicitando compartilhamento de áudio...';
+      statusText.className = 'status';
+      
+      // Usar o navigator.mediaDevices.getDisplayMedia para capturar áudio do sistema
+      const stream = await navigator.mediaDevices.getDisplayMedia({ 
+        audio: true,
+        video: true  // getDisplayMedia requer video: true para funcionar
+      });
+      
+      // Desativar e remover as faixas de vídeo - não precisamos delas
+      stream.getVideoTracks().forEach(track => {
+        track.enabled = false;
+        track.stop();
+        stream.removeTrack(track);
+      });
+      
+      // Verificar se temos faixas de áudio
+      if (stream.getAudioTracks().length === 0) {
+        throw new Error('Nenhuma faixa de áudio disponível no stream capturado');
       }
       
-      // Função helper para transformar callback em Promise
-      function captureTab() {
-        return new Promise((resolve, reject) => {
-          chrome.tabCapture.capture({
-            audio: true,
-            video: false
-          }, (stream) => {
-            if (chrome.runtime.lastError) {
-              reject(new Error(chrome.runtime.lastError.message));
-            } else if (!stream) {
-              reject(new Error('Não foi possível capturar o áudio da aba. Tente abrir a extensão em uma nova aba.'));
-            } else {
-              resolve(stream);
-            }
-          });
-        });
-      }
-      
-      const stream = await captureTab();
-      
-      // Se chegou aqui, conseguiu capturar o stream
-      statusText.textContent = 'Status: Áudio capturado com sucesso!';
-      
-      // Inicializar contexto de áudio
-      audioContext = new AudioContext();
-      mediaStreamSource = audioContext.createMediaStreamSource(stream);
-      mediaStreamSource.connect(audioContext.destination);
-
-      
-      // Configurar analisadores
-      analyser = audioContext.createAnalyser();
-      analyser.fftSize = 2048;
-      analyser.smoothingTimeConstant = 0.85;
-      
-      // Setup para áudio estéreo
-      splitter = audioContext.createChannelSplitter(2);
-      analyserLeft = audioContext.createAnalyser();
-      analyserRight = audioContext.createAnalyser();
-      
-      analyserLeft.fftSize = 1024;
-      analyserRight.fftSize = 1024;
-      analyserLeft.smoothingTimeConstant = 0.3;
-      analyserRight.smoothingTimeConstant = 0.3;
-      
-      // Conectar nós de áudio
-      mediaStreamSource.connect(analyser);
-      mediaStreamSource.connect(splitter);
-      splitter.connect(analyserLeft, 0);
-      splitter.connect(analyserRight, 1);
-      
-      // Arrays para dados
-      const frequencyData = new Uint8Array(analyser.frequencyBinCount);
-      const timeDataLeft = new Float32Array(analyserLeft.fftSize);
-      const timeDataRight = new Float32Array(analyserRight.fftSize);
-      
-      isCapturing = true;
-      statusText.textContent = 'Status: Analisando áudio...';
-      
-      // Função de atualização
-      function updateVisualization() {
-        if (!isCapturing) return;
-        
-        // Dados de frequência para espectrograma
-        analyser.getByteFrequencyData(frequencyData);
-        
-        // Dados temporais para VU meters
-        analyserLeft.getFloatTimeDomainData(timeDataLeft);
-        analyserRight.getFloatTimeDomainData(timeDataRight);
-        
-        // Calcular RMS para cada canal
-        let sumLeft = 0;
-        let sumRight = 0;
-        
-        for (let i = 0; i < timeDataLeft.length; i++) {
-          sumLeft += timeDataLeft[i] * timeDataLeft[i];
-        }
-        
-        for (let i = 0; i < timeDataRight.length; i++) {
-          sumRight += timeDataRight[i] * timeDataRight[i];
-        }
-        
-        const rmsLeft = Math.sqrt(sumLeft / timeDataLeft.length);
-        const rmsRight = Math.sqrt(sumRight / timeDataRight.length);
-        
-        // Atualizar visualizações
-        updateSpectrogram(frequencyData);
-        updateVUMeters(rmsLeft, rmsRight);
-        
-        // Continuar loop
-        animationFrameId = requestAnimationFrame(updateVisualization);
-      }
-      
-      // Iniciar loop de visualização
-      updateVisualization();
+      // Processar o stream capturado
+      processAudioStream(stream);
       
     } catch (error) {
       console.error('Erro ao capturar áudio:', error);
-      statusText.textContent = 'Status: Erro ao capturar - ' + error.message;
-      startButton.disabled = false;
-      stopButton.disabled = true;
+      
+      // Tentar um fallback para o microfone
+      try {
+        statusText.textContent = 'Status: Tentando usar microfone como fallback...';
+        statusText.className = 'status';
+        
+        const micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        statusText.textContent = 'Status: Usando microfone (não é o áudio do sistema)';
+        statusText.className = 'status warning';
+        
+        processAudioStream(micStream);
+      } catch (micError) {
+        console.error('Erro ao usar microfone:', micError);
+        statusText.textContent = 'Status: Erro ao capturar - ' + error.message;
+        statusText.className = 'status error';
+        startButton.disabled = false;
+        stopButton.disabled = true;
+      }
     }
+  }
+  
+  // Processar stream de áudio capturado
+  function processAudioStream(stream) {
+    // Se chegou aqui, conseguiu capturar o stream
+    if (!statusText.classList.contains('warning')) {
+      statusText.textContent = 'Status: Áudio capturado com sucesso!';
+      statusText.className = 'status success';
+    }
+    
+    // Adicionar classe de captura ao body para efeitos visuais
+    document.body.classList.add('capturing');
+    
+    // Inicializar contexto de áudio
+    audioContext = new AudioContext();
+    mediaStreamSource = audioContext.createMediaStreamSource(stream);
+    mediaStreamSource.connect(audioContext.destination);
+    
+    // Configurar analisadores
+    analyser = audioContext.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.85;
+    
+    // Setup para áudio estéreo
+    splitter = audioContext.createChannelSplitter(2);
+    analyserLeft = audioContext.createAnalyser();
+    analyserRight = audioContext.createAnalyser();
+    
+    analyserLeft.fftSize = 1024;
+    analyserRight.fftSize = 1024;
+    analyserLeft.smoothingTimeConstant = 0.3;
+    analyserRight.smoothingTimeConstant = 0.3;
+    
+    // Conectar nós de áudio
+    mediaStreamSource.connect(analyser);
+    mediaStreamSource.connect(splitter);
+    splitter.connect(analyserLeft, 0);
+    splitter.connect(analyserRight, 1);
+    
+    // Arrays para dados
+    const frequencyData = new Uint8Array(analyser.frequencyBinCount);
+    const timeDataLeft = new Float32Array(analyserLeft.fftSize);
+    const timeDataRight = new Float32Array(analyserRight.fftSize);
+    
+    isCapturing = true;
+    
+    if (!statusText.classList.contains('warning')) {
+      statusText.textContent = 'Status: Analisando áudio...';
+      statusText.className = 'status success';
+    }
+    
+    // Função de atualização
+    function updateVisualization() {
+      if (!isCapturing) return;
+      
+      // Dados de frequência para espectrograma
+      analyser.getByteFrequencyData(frequencyData);
+      
+      // Dados temporais para VU meters
+      analyserLeft.getFloatTimeDomainData(timeDataLeft);
+      analyserRight.getFloatTimeDomainData(timeDataRight);
+      
+      // Calcular RMS para cada canal
+      let sumLeft = 0;
+      let sumRight = 0;
+      
+      for (let i = 0; i < timeDataLeft.length; i++) {
+        sumLeft += timeDataLeft[i] * timeDataLeft[i];
+      }
+      
+      for (let i = 0; i < timeDataRight.length; i++) {
+        sumRight += timeDataRight[i] * timeDataRight[i];
+      }
+      
+      const rmsLeft = Math.sqrt(sumLeft / timeDataLeft.length);
+      const rmsRight = Math.sqrt(sumRight / timeDataRight.length);
+      
+      // Atualizar visualizações
+      updateSpectrogram(frequencyData);
+      updateVUMeters(rmsLeft, rmsRight);
+      
+      // Continuar loop
+      animationFrameId = requestAnimationFrame(updateVisualization);
+    }
+    
+    // Iniciar loop de visualização
+    updateVisualization();
   }
   
   // Função para parar a captura de áudio
@@ -180,6 +250,10 @@ document.addEventListener('DOMContentLoaded', function() {
     analyserRight = null;
     audioContext = null;
     isCapturing = false;
+    
+    // Resetar estado visual
+    statusText.className = 'status';
+    document.body.classList.remove('capturing');
   }
   
   // Função para atualizar o espectrograma
